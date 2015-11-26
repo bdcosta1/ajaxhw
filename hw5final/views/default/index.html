@@ -1,0 +1,251 @@
+{{left_sidebar_enabled,right_sidebar_enabled=False,('message' in globals())}}
+{{extend 'layout.html'}}
+<div id="target"></div>
+
+<script id="template" type="text/ractive">
+    {% #if loggedIn === "True" %}
+        <input class="btn btn-primary" type="submit" value="Create Board" on-click="addBoard"/>
+    {% /if %}
+    <div>
+        {% #board_dict:board_id %}
+            <div class="boardList">
+                {% #if editable %}
+                <p><b>Board Title</b> (Click Title to Edit It):</p>
+                    {% #if editing %}
+                        <textarea id="{% ident %}" on-blur="editdone" data-iden="{% key %}" value="{% name %}" rows="5" columns = "30"></textarea>
+                    {% /if %}
+                    {% #if editing === false %}
+                        <div on-click="startedit" data-iden="{% key %}"><p class = "displayBoard">{% name %}</p></div>
+                    {% /if %}
+                {% /if %}
+                {% #if editable === false %}
+                    <p><b>Board Title</b></p>
+                    <div><p class = "displayBoard">{% name %}</p></div>
+                {% /if %}
+                {% #if editing === false %}
+                    <a href="{% "posts" + "/" +draft_id +"/" + key %}">Go to Posts!</a>
+                {% /if %}
+            </div>
+        {% /board_dict %}
+    </div>
+
+</script>
+
+<script>
+$(function() {
+  // Ractive object
+  var MAIN = new Ractive({
+    el: '#target',
+    template: '#template',
+    delimiters: ['{%', '%}'],
+    tripleDelimiters: ['{%%', '%%}'],
+    data: {
+        board_dict:{},
+        mytext: 'Enter Board Name',
+        board_names:{},
+        board_id: "{{=board_id}}",
+        loggedIn: "{{=loggedIn}}",
+        user_id: "{{=user_id}}",
+        oldBoardName: "",
+        editingKey: -1
+    },
+  });
+    function periodic_receive() {
+        $.ajax("{{=URL('default', 'load_boards', user_signature=True)}}",
+                {
+                    method: 'POST',
+                    success: function (data) {
+                        var oldRow = -1;
+                        if(MAIN.get("editingKey")!=-1){
+                            oldRow = MAIN.get("board_dict")[MAIN.get("editingKey")];
+                        }
+                        var board_dict = data['board_dict'];
+                        m = Object.keys(board_dict).length;
+                        var i;
+                        for (var key in board_dict){
+                            if(board_dict[key]["board_creator"]==MAIN.get('user_id')){
+                                board_dict[key]["editable"] = true;
+                            }
+                            else{
+                                board_dict[key]["editable"] = false;
+                            }
+                            if(key != MAIN.get("editingKey")){
+                                board_dict[key]["editing"] = false;
+                            }
+                            else{
+                                board_dict[key] = oldRow;
+                            }
+                            if(board_dict[key]["draft_id"] == MAIN.get("editingKey")){
+                                delete board_dict[key];
+                            }
+                            else {
+                                board_dict[key]["ident"] = board_dict[key]["draft_id"];
+                                board_dict[key]["key"] = key;
+                            }
+                        }
+                        if((!(MAIN.get("editingKey") in board_dict))&& (MAIN.get("editingKey")!= -1)){
+                            board_dict[MAIN.get("editingKey")] = oldRow;
+                        }
+                        var old_dict = MAIN.get("board_dict");
+                        for (key in old_dict){
+                            if(old_dict[key]["fromDB"]=="false"){
+                                board_dict[key] = old_dict[key];
+                            }
+                        }
+                        MAIN.set('board_dict', board_dict);
+                    }
+                }
+        );
+    }
+    periodic_receive();
+    setInterval(periodic_receive, 10000);
+function send_board(name, key) {
+    var call_draft_id = MAIN.get('draft_id');
+    $.ajax("{{=URL('default', 'add_board', user_signature=True)}}",
+            {
+              data: {
+                name: name, // request.vars.name
+                draft_id: key
+              },
+              method: 'POST',
+              success: function() {
+                // Reflect in the list of drafts or messages the update sent to the server.
+              },
+              error: function() {
+                  $.web2py.flash("board submit error");
+              }
+            }
+    );
+  }
+    function update_boardEdit(name, loc) {
+    $.ajax("{{=URL('default', 'update_board', user_signature=True)}}",
+            {
+              data: {
+                name: name, // request.vars.name
+                loc: loc
+              },
+              method: 'POST',
+              success: function() {
+                // Reflect in the list of drafts or messages the update sent to the server.
+              },
+              error: function() {
+                  $.web2py.flash("board submit error");
+              }
+            }
+    );
+  }
+    function newBoardHandle(name) {
+    $.ajax("{{=URL('default', 'newBoardHandle', user_signature=True)}}",
+            {
+              data: {
+                name: name, // request.vars.name
+                draft_id: MAIN.get("editingKey")
+              },
+              method: 'POST',
+              success: function() {
+                // Reflect in the list of drafts or messages the update sent to the server.
+              },
+              error: function() {
+                  $.web2py.flash("board submit error");
+              }
+            }
+    );
+  }
+    function deleteBoard(key) {
+    $.ajax("{{=URL('default', 'deleteBoard', user_signature=True)}}",
+            {
+              data: {
+                key: key,
+              },
+              method: 'POST',
+              success: function() {
+                // Reflect in the list of drafts or messages the update sent to the server.
+              },
+              error: function() {
+                  $.web2py.flash("board delete failure");
+              }
+            }
+    );
+  }
+  MAIN.on("startedit", function(e) {
+      var board_dict = MAIN.get("board_dict");
+      var key = $(e.node).data("iden");
+      if (board_dict[key]["fromDB"]=="false"){
+          board_dict[key]["name"] = "";
+      }
+      MAIN.set("editingKey", key);
+      board_dict[key]["editing"] = true;
+      MAIN.set("board_dict", board_dict);
+      MAIN.set("oldBoardName", board_dict[key]["name"]);
+      $("#"+key).focus();
+      if(board_dict[key]["fromDB"]=="True"){
+          periodic_send();
+      }
+      else{
+          periodic_sendNewBoard();
+      }
+  });
+  function periodic_send(){
+      if((MAIN.get("board_dict")[MAIN.get("editingKey")]["name"].trim().length != 0)&&(MAIN.get("board_dict")[MAIN.get("editingKey")]["fromDB"]=="True")){
+         //alert(MAIN.get("editingKey")+"not new Board");
+          MAIN.set("oldBoardName", MAIN.get("board_dict")[MAIN.get("editingKey")]["name"]);
+          update_boardEdit(MAIN.get("board_dict")[MAIN.get("editingKey")]["name"], MAIN.get("editingKey"));
+      }
+  }
+    function periodic_sendNewBoard(){
+      if((MAIN.get("board_dict")[MAIN.get("editingKey")]["name"].trim().length != 0)&&(MAIN.get("board_dict")[MAIN.get("editingKey")]["fromDB"]=="false")){
+          //alert(MAIN.get("editingKey")+"new Board");
+          MAIN.set("oldBoardName", MAIN.get("board_dict")[MAIN.get("editingKey")]["name"]);
+          newBoardHandle(MAIN.get("board_dict")[MAIN.get("editingKey")]["name"]);
+      }
+  }
+  setInterval(periodic_send, 1000);
+    setInterval(periodic_sendNewBoard, 1000);
+  MAIN.on("editdone", function(e) {
+    //MAIN.set("editing", false);
+      MAIN.set("editingKey", -1);
+      var board_dict = MAIN.get("board_dict");
+      var key = $(e.node).data("iden");
+      board_dict[key]["editing"] = false;
+      if((board_dict[key]["name"].trim().length == 0) && (board_dict[key]["fromDB"] == "false")){
+          delete board_dict[key];
+          MAIN.set("board_dict", board_dict);
+      }
+      else if((board_dict[key]["name"].trim().length == 0) && (board_dict[key]["fromDB"] == "True")){
+          board_dict[key]["name"] = MAIN.get("oldBoardName");
+          MAIN.set("board_dict", board_dict);
+      }
+      else if (board_dict[key]["fromDB"] == "false") {
+          send_board(board_dict[key]["name"], key);
+          periodic_receive();
+          delete board_dict[key];
+      }
+      else if (board_dict[key]["fromDB"] == "True"){
+          send_board(board_dict[key]["name"], board_dict[key]["draft_id"]);
+          //delete board_dict[key];
+          periodic_receive();
+      }
+      MAIN.set("board_dict", board_dict);
+  });
+    MAIN.on("addBoard", function(e) {
+        var board_dict = MAIN.get('board_dict');
+        var board_id = generateUUID();
+        board_dict[board_id]={'name':"Enter Board Name", 'fromDB':"false", 'editable':"true", 'editing': false, 'key': board_id, 'draft_id': board_id};
+        MAIN.set('board_dict',board_dict);
+
+    });
+    // http://stackoverflow.com/questions/105034/create-guid-uuid-in-javascript
+    function generateUUID(){
+    var d = new Date().getTime();
+    if(window.performance && typeof window.performance.now === "function"){
+        d += performance.now();; //use high-precision timer if available
+    }
+    var uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = (d + Math.random()*16)%16 | 0;
+        d = Math.floor(d/16);
+        return (c=='x' ? r : (r&0x3|0x8)).toString(16);
+    });
+    return uuid;
+  }
+});
+</script>
